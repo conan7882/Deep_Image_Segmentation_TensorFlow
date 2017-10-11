@@ -10,18 +10,18 @@ from tensorcv.dataflow.image import *
 
 def side_output(input_conv, o_height, o_width, name):
     with tf.variable_scope(name) as scope:
-        side_out = conv(input_conv, 1, 1, 'conv', wd = 0.0002,
-                        init_w = tf.constant_initializer(),
-                        init_b = tf.constant_initializer())
+        side_out = conv(input_conv, 1, 1, 'conv', wd=0.0002,
+                        init_w=tf.constant_initializer(),
+                        init_b=tf.constant_initializer())
         side_out = tf.image.resize_bilinear(side_out, 
-                    [o_height, o_width], name = 'output')
+                    [o_height, o_width], name='output')
         return side_out
 
 class BaseHED(BaseModel):
     """ base of class activation map class """
-    def __init__(self, num_class = 2, 
-                 num_channels = 3, 
-                 learning_rate = 0.0001):
+    def __init__(self, num_class=2, 
+                 num_channels=3, 
+                 learning_rate=0.0001):
 
         self._learning_rate = learning_rate
         self._num_channels = num_channels
@@ -31,12 +31,12 @@ class BaseHED(BaseModel):
 
     def _create_input(self):
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
-        self.image = tf.placeholder(tf.float32, name = 'image',
-                            shape = [None, None, None, self._num_channels])
+        self.image = tf.placeholder(tf.float32, name='image',
+                            shape=[None, None, None, self._num_channels])
         self.label = tf.placeholder(tf.int32, [None, None, None, 1], 'label')
 
         self.set_model_input([self.image, self.keep_prob])
-        self.set_dropout(self.keep_prob, keep_prob = 0.5)
+        self.set_dropout(self.keep_prob, keep_prob=0.5)
         self.set_train_placeholder([self.image, self.label])
         self.set_prediction_placeholder([self.image, self.label])
 
@@ -49,44 +49,44 @@ class BaseHED(BaseModel):
             tf.add_to_collection('losses', side_loss)
 
             cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits = self.output, labels = self.label)
+                logits=self.output, labels=self.label)
             cross_entropy_loss = tf.reduce_mean(cross_entropy, 
-                                name = 'cross_entropy_loss') 
+                                name='cross_entropy_loss') 
             tf.add_to_collection('losses', cross_entropy_loss)
-            return tf.add_n(tf.get_collection('losses'), name = 'result') 
+            return tf.add_n(tf.get_collection('losses'), name='result') 
 
     def _side_loss(self):
         raise NotImplementedError()     
 
     def _get_optimizer(self):
-        return tf.train.AdamOptimizer(beta1=0.5, learning_rate = self._learning_rate)
+        return tf.train.AdamOptimizer(beta1=0.5, learning_rate=self._learning_rate)
 
     def _ex_setup_graph(self):
         with tf.name_scope('accuracy'):
             correct_prediction = tf.equal(self.prediction, self.label)
             self.accuracy = tf.reduce_mean(
                         tf.cast(correct_prediction, tf.float32), 
-                        name = 'result')
+                        name='result')
 
     def _setup_summary(self):
-        tf.summary.scalar("train_accuracy", self.accuracy, collections = ['train'])
+        tf.summary.scalar("train_accuracy", self.accuracy, collections=['train'])
 
     
 
 class VGGHED(BaseHED):
-    def __init__(self, num_class = 2, 
-                 num_channels = 3, 
-                 learning_rate = 0.0001,
-                 is_load = True,
-                 pre_train_path = None):
+    def __init__(self, num_class=2, 
+                 num_channels=3, 
+                 learning_rate=0.0001,
+                 is_load=True,
+                 pre_train_path=None):
 
         self._is_load = is_load
         if self._is_load and pre_train_path is None:
             raise ValueError('pre_train_path can not be None!')
         self._pre_train_path = pre_train_path 
-        super(VGGHED, self).__init__(num_class = num_class, 
-                                    num_channels = num_channels, 
-                                    learning_rate = 0.0001)
+        super(VGGHED, self).__init__(num_class=num_class, 
+                                    num_channels=num_channels, 
+                                    learning_rate=0.0001)
 
     def _create_model(self):
 
@@ -96,8 +96,8 @@ class VGGHED(BaseHED):
 
         VGG_MEAN = [103.939, 116.779, 123.68]
 
-        red, green, blue = tf.split(axis = 3, num_or_size_splits = 3, 
-                                    value = input_im)
+        red, green, blue = tf.split(axis=3, num_or_size_splits=3, 
+                                    value=input_im)
         input_bgr = tf.concat(axis=3, values=[
             blue - VGG_MEAN[0],
             green - VGG_MEAN[1],
@@ -109,32 +109,32 @@ class VGGHED(BaseHED):
             data_dict = np.load(self._pre_train_path, encoding='latin1').item()
 
         arg_scope = tf.contrib.framework.arg_scope
-        with arg_scope([conv], nl = tf.nn.relu, trainable = False, data_dict = data_dict):
+        with arg_scope([conv], nl=tf.nn.relu, trainable=False, data_dict=data_dict):
             conv1_1 = conv(input_im, 3, 64, 'conv1_1')
             conv1_2 = conv(conv1_1, 3, 64, 'conv1_2')
-            pool1 = max_pool(conv1_2, 'pool1', padding = 'SAME')
+            pool1 = max_pool(conv1_2, 'pool1', padding='SAME')
 
             conv2_1 = conv(pool1, 3, 128, 'conv2_1')
             conv2_2 = conv(conv2_1, 3, 128, 'conv2_2')
-            pool2 = max_pool(conv2_2, 'pool2', padding = 'SAME')
+            pool2 = max_pool(conv2_2, 'pool2', padding='SAME')
 
             conv3_1 = conv(pool2, 3, 256, 'conv3_1')
             conv3_2 = conv(conv3_1, 3, 256, 'conv3_2')
             conv3_3 = conv(conv3_2, 3, 256, 'conv3_3')
             conv3_4 = conv(conv3_3, 3, 256, 'conv3_4')
-            pool3 = max_pool(conv3_4, 'pool3', padding = 'SAME')
+            pool3 = max_pool(conv3_4, 'pool3', padding='SAME')
 
             conv4_1 = conv(pool3, 3, 512, 'conv4_1')
             conv4_2 = conv(conv4_1, 3, 512, 'conv4_2')
             conv4_3 = conv(conv4_2, 3, 512, 'conv4_3')
             conv4_4 = conv(conv4_3, 3, 512, 'conv4_4')
-            pool4 = max_pool(conv4_4, 'pool4', padding = 'SAME')
+            pool4 = max_pool(conv4_4, 'pool4', padding='SAME')
 
             conv5_1 = conv(pool4, 3, 512, 'conv5_1')
             conv5_2 = conv(conv5_1, 3, 512, 'conv5_2')
             conv5_3 = conv(conv5_2, 3, 512, 'conv5_3')
             conv5_4 = conv(conv5_3, 3, 512, 'conv5_4')
-            # pool5 = max_pool(conv5_4, 'pool5', padding = 'SAME')
+            # pool5 = max_pool(conv5_4, 'pool5', padding='SAME')
 
             o_height, o_width = tf.shape(input_im)[1], tf.shape(input_im)[2]
 
@@ -148,8 +148,8 @@ class VGGHED(BaseHED):
                 side_mat = tf.concat([self.side_1, self.side_2, self.side_3, 
                                     self.side_4, self.side_5], 3)
                 self.output = conv(side_mat, 1, 1, 'fusion_weight',
-                                    wd = 0.0002, use_bias = False,
-                                    init_w = tf.constant_initializer(0.2))
+                                    wd=0.0002, use_bias=False,
+                                    init_w=tf.constant_initializer(0.2))
                 self.prediction = tf.cast(tf.greater(tf.nn.sigmoid(self.output), 0.5), 
                     tf.int32, name='pre_label')
 
@@ -157,7 +157,7 @@ class VGGHED(BaseHED):
 
 
 if __name__ == '__main__':
-    model = VGGHED(is_load = False)
+    model = VGGHED(is_load=False)
         # pre_train_path = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg19.npy')
 
 #     num_class = 257
