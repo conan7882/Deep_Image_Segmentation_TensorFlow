@@ -159,20 +159,20 @@ class VGGHED(BaseHED):
             conv5_4 = conv(conv5_3, 3, 512, 'conv5_4')
             # pool5 = max_pool(conv5_4, 'pool5', padding='SAME')
 
-        with tf.name_scope('side_output') as scope:
-            o_height, o_width = tf.shape(input_im)[1], tf.shape(input_im)[2]
-            side_1 = side_output(conv1_2, o_height, o_width, 'side_1')
-            side_2 = side_output(conv2_2, o_height, o_width, 'side_2')
-            side_3 = side_output(conv3_4, o_height, o_width, 'side_3')
-            side_4 = side_output(conv4_4, o_height, o_width, 'side_4')
-            side_5 = side_output(conv5_4, o_height, o_width, 'side_5')
+        o_height, o_width = tf.shape(input_im)[1], tf.shape(input_im)[2]
+
+        side_1 = side_output(conv1_2, o_height, o_width, 'side_1')
+        side_2 = side_output(conv2_2, o_height, o_width, 'side_2')
+        side_3 = side_output(conv3_4, o_height, o_width, 'side_3')
+        side_4 = side_output(conv4_4, o_height, o_width, 'side_4')
+        side_5 = side_output(conv5_4, o_height, o_width, 'side_5')
 
         with tf.variable_scope('output') as scope:
             side_mat = tf.concat([side_1, side_2, side_3, side_4, side_5], 3)
             self.output = conv(side_mat, 1, 1, 'fusion_weight',
                                 wd=0.0002, use_bias=False,
                                 init_w=tf.constant_initializer(0.2))
-            prediction = tf.greater(tf.nn.sigmoid(self.output), 0.5)
+            prediction = tf.squeeze(tf.greater(tf.nn.sigmoid(self.output), 0.5), axis = -1)
             self.prediction = tf.cast(prediction, tf.int32, name='pre_label')
             self.output_list = [side_1, side_2, side_3, side_4, side_5, self.output]
 
@@ -180,7 +180,6 @@ class VGGHED(BaseHED):
         with tf.name_scope('loss'):
             # cost = []
             for idx, out in enumerate(self.output_list):
-                # TODO to be modified
                 out = tf.squeeze(out, axis = -1)
                 side_cost = class_balanced_cross_entropy_with_logits(out, self.label, name = 'cost_{}'.format(idx))
                 tf.add_to_collection('losses', side_cost)
@@ -204,10 +203,18 @@ class VGGHED(BaseHED):
 
 
 if __name__ == '__main__':
-    model = VGGHED(is_load=False,
-           pre_train_path = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg19.npy')
+    model = VGGHED(is_load=False)
+        # pre_train_path = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg19.npy')
 
+#     num_class = 257
+#     num_channels = 3
 
+#     vgg_cam_model = VGGCAM(num_class = num_class, 
+#                            inspect_class = None,
+#                            num_channels = num_channels, 
+#                            learning_rate = 0.0001,
+#                            is_load = True,
+#                            pre_train_path = 'E:\\GITHUB\\workspace\\CNN\pretrained\\vgg19.npy')
             
     model.create_graph()
 
@@ -215,7 +222,7 @@ if __name__ == '__main__':
     opt = model.get_optimizer()
     train_op = opt.apply_gradients(grads, name = 'train')
 
-    writer = tf.summary.FileWriter('E:\\GITHUB\\workspace\\CNN\\other\\')
+    writer = tf.summary.FileWriter('D:\\Qian\\GitHub\\workspace\\CNN\\other\\')
     with tf.Session() as sess:
         sess.run(tf.global_variables_initializer())
         writer.add_graph(sess.graph)
