@@ -1,5 +1,6 @@
 # File: HED.py
 # Author: Qian Ge <geqian1001@gmail.com>
+# reference code: https://github.com/ppwwyyxx/tensorpack/blob/master/examples/HED/hed.py
 
 import tensorflow as tf
 
@@ -17,6 +18,28 @@ def side_output(input_conv, o_height, o_width, name):
                     [o_height, o_width], name='output')
         return side_out
 
+def  class_balanced_cross_entropy_with_logits(logits, label, 
+                                name='class_balanced_cross_entropy'):
+    '''
+    original from 'Holistically-Nested Edge Detection (CVPR 15)'
+    '''
+    with tf.name_scope(name) as scope:
+        logits = tf.cast(logits, tf.float32)
+        label = tf.cast(label, tf.float32)
+        num_pos = tf.reduce_sum(label)
+        num_neg = tf.reduce_sum(1.0 - label)
+
+        beta = num_neg / (num_neg + num_pos)
+        pos_weight = beta / (1 - beta)
+
+        cost = tf.nn.weighted_cross_entropy_with_logits(targets=label, 
+                                                        logits=logits, 
+                                                        pos_weight=pos_weight)
+        loss = tf.reduce_mean((1 - beta) * cost)
+
+        return tf.where(tf.equal(beta, 1.0), 0.0, loss)
+
+
 class BaseHED(BaseModel):
     """ base of class activation map class """
     def __init__(self, num_class=2, 
@@ -33,7 +56,7 @@ class BaseHED(BaseModel):
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
         self.image = tf.placeholder(tf.float32, name='image',
                             shape=[None, None, None, self._num_channels])
-        self.label = tf.placeholder(tf.int32, [None, None, None, 1], 'label')
+        self.label = tf.placeholder(tf.int32, [None, None, None], 'label')
 
         self.set_model_input([self.image, self.keep_prob])
         self.set_dropout(self.keep_prob, keep_prob=0.5)
@@ -43,20 +66,20 @@ class BaseHED(BaseModel):
     # def _create_conv(self, input_im):
     #     raise NotImplementedError()
 
-    def _get_loss(self):
-        with tf.name_scope('loss'):
-            side_loss = self._side_loss()
-            tf.add_to_collection('losses', side_loss)
+    # def _get_loss(self):
+    #     with tf.name_scope('loss'):
+    #         side_loss = self._side_loss()
+    #         tf.add_to_collection('losses', side_loss)
 
-            cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=self.output, labels=self.label)
-            cross_entropy_loss = tf.reduce_mean(cross_entropy, 
-                                name='cross_entropy_loss') 
-            tf.add_to_collection('losses', cross_entropy_loss)
-            return tf.add_n(tf.get_collection('losses'), name='result') 
+    #         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+    #             logits=self.output, labels=self.label)
+    #         cross_entropy_loss = tf.reduce_mean(cross_entropy, 
+    #                             name='cross_entropy_loss') 
+    #         tf.add_to_collection('losses', cross_entropy_loss)
+    #         return tf.add_n(tf.get_collection('losses'), name='result') 
 
-    def _side_loss(self):
-        raise NotImplementedError()     
+    # def _side_loss(self):
+    #     raise NotImplementedError()     
 
     def _get_optimizer(self):
         return tf.train.AdamOptimizer(beta1=0.5, learning_rate=self._learning_rate)
@@ -136,45 +159,61 @@ class VGGHED(BaseHED):
             conv5_4 = conv(conv5_3, 3, 512, 'conv5_4')
             # pool5 = max_pool(conv5_4, 'pool5', padding='SAME')
 
+        with tf.name_scope('side_output') as scope:
             o_height, o_width = tf.shape(input_im)[1], tf.shape(input_im)[2]
+            side_1 = side_output(conv1_2, o_height, o_width, 'side_1')
+            side_2 = side_output(conv2_2, o_height, o_width, 'side_2')
+            side_3 = side_output(conv3_4, o_height, o_width, 'side_3')
+            side_4 = side_output(conv4_4, o_height, o_width, 'side_4')
+            side_5 = side_output(conv5_4, o_height, o_width, 'side_5')
 
-            self.side_1 = side_output(conv1_2, o_height, o_width, 'side_1')
-            self.side_2 = side_output(conv2_2, o_height, o_width, 'side_2')
-            self.side_3 = side_output(conv3_4, o_height, o_width, 'side_3')
-            self.side_4 = side_output(conv4_4, o_height, o_width, 'side_4')
-            self.side_5 = side_output(conv5_4, o_height, o_width, 'side_5')
+        with tf.variable_scope('output') as scope:
+            side_mat = tf.concat([side_1, side_2, side_3, side_4, side_5], 3)
+            self.output = conv(side_mat, 1, 1, 'fusion_weight',
+                                wd=0.0002, use_bias=False,
+                                init_w=tf.constant_initializer(0.2))
+            prediction = tf.greater(tf.nn.sigmoid(self.output), 0.5)
+            self.prediction = tf.cast(prediction, tf.int32, name='pre_label')
+            self.output_list = [side_1, side_2, side_3, side_4, side_5, self.output]
 
-            with tf.variable_scope('output') as scope:
-                side_mat = tf.concat([self.side_1, self.side_2, self.side_3, 
-                                    self.side_4, self.side_5], 3)
-                self.output = conv(side_mat, 1, 1, 'fusion_weight',
-                                    wd=0.0002, use_bias=False,
-                                    init_w=tf.constant_initializer(0.2))
-                self.prediction = tf.cast(tf.greater(tf.nn.sigmoid(self.output), 0.5), 
-                    tf.int32, name='pre_label')
+    def _get_loss(self):
+        with tf.name_scope('loss'):
+            # cost = []
+            for idx, out in enumerate(self.output_list):
+                # TODO to be modified
+                out = tf.squeeze(out, axis = -1)
+                side_cost = class_balanced_cross_entropy_with_logits(out, self.label, name = 'cost_{}'.format(idx))
+                tf.add_to_collection('losses', side_cost)
+            
+            return tf.add_n(tf.get_collection('losses'), name='result') 
+
+            
+
+         # with tf.name_scope('loss'):
+         #    side_loss = self._side_loss()
+         #    tf.add_to_collection('losses', side_loss)
+
+         #    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+         #        logits=self.output, labels=self.label)
+         #    cross_entropy_loss = tf.reduce_mean(cross_entropy, 
+         #                        name='cross_entropy_loss') 
+         #    tf.add_to_collection('losses', cross_entropy_loss)
+         #    return tf.add_n(tf.get_collection('losses'), name='result') 
 
 
 
 
 if __name__ == '__main__':
-    model = VGGHED(is_load=False)
-        # pre_train_path = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg19.npy')
+    model = VGGHED(is_load=False,
+           pre_train_path = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg19.npy')
 
-#     num_class = 257
-#     num_channels = 3
 
-#     vgg_cam_model = VGGCAM(num_class = num_class, 
-#                            inspect_class = None,
-#                            num_channels = num_channels, 
-#                            learning_rate = 0.0001,
-#                            is_load = True,
-#                            pre_train_path = 'E:\\GITHUB\\workspace\\CNN\pretrained\\vgg19.npy')
             
     model.create_graph()
 
-#     grads = vgg_cam_model.get_grads()
-#     opt = vgg_cam_model.get_optimizer()
-#     train_op = opt.apply_gradients(grads, name = 'train')
+    grads = model.get_grads()
+    opt = model.get_optimizer()
+    train_op = opt.apply_gradients(grads, name = 'train')
 
     writer = tf.summary.FileWriter('E:\\GITHUB\\workspace\\CNN\\other\\')
     with tf.Session() as sess:
