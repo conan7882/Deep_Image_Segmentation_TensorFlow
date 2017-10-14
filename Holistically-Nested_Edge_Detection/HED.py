@@ -8,7 +8,7 @@ import tensorcv
 from tensorcv.models.layers import *
 from tensorcv.models.base import BaseModel
 from tensorcv.dataflow.image import *
-from tensorcv.utils.common import deconv_size
+from tensorcv.utils.common import deconv_size, apply_mask, apply_mask_inverse
 
 def bilinear_upsample(input_im, up, out_shape = None):
 # https://github.com/BVLC/caffe/blob/master/include%2Fcaffe%2Ffiller.hpp#L244
@@ -68,7 +68,7 @@ def deconv_tensor_size(s, stride = 2):
     new_w = tf.cast(tf.ceil(tf.cast(s[2], tf.float32) / stride_tensor), tf.int32) 
     return tf.stack([s[0], new_h, new_w, s[3]])
            
-def side_output(input_conv, up, o_im, name):
+def side_output(input_conv, up, o_shape, name):
     with tf.variable_scope(name) as scope:
         side_out = conv(input_conv, 1, 1, 'conv', 
                         wd=0.0002,
@@ -76,7 +76,7 @@ def side_output(input_conv, up, o_im, name):
                         init_b=tf.constant_initializer())
 
         if up >= 2:
-            o_shape = tf.shape(o_im)
+            
             out_shape = tf.stack([o_shape[0], o_shape[1], o_shape[2], 1])
             shape_list = [out_shape,]
             prev_s = out_shape
@@ -132,6 +132,7 @@ class BaseHED(BaseModel):
         self.image = tf.placeholder(tf.float32, name='image',
                             shape=[None, None, None, self._num_channels])
         self.label = tf.placeholder(tf.int32, [None, None, None], 'label')
+        self.consensus_label = tf.cast(tf.greater(self.label, 1), tf.int32)
 
         self.set_model_input([self.image, self.keep_prob])
         self.set_dropout(self.keep_prob, keep_prob=0.5)
@@ -157,24 +158,33 @@ class BaseHED(BaseModel):
     #     raise NotImplementedError()     
 
     def _get_optimizer(self):
-        return tf.train.AdamOptimizer(beta1=0.5, learning_rate=self._learning_rate)
+        # learning_rate = tf.train.exponential_decay(self._learning_rate, self.get_global_step,
+        #                                       80000, 0.1, False)
+        return tf.train.AdamOptimizer(learning_rate=self._learning_rate)
 
     def _ex_setup_graph(self):
         with tf.name_scope('accuracy'):
-            correct_prediction = tf.equal(self.prediction, self.label)
-            self.accuracy = tf.reduce_mean(
-                        tf.cast(correct_prediction, tf.float32), 
-                        name='result')
+            num_pos = tf.reduce_sum(self.consensus_label)
+            num_neg = tf.reduce_sum(1 - self.consensus_label)
+            neg_ratio = num_neg / (num_neg + num_pos)
+            pos_ration = 1 - neg_ratio
+
+            true_pos = apply_mask(tf.equal(self.prediction, self.consensus_label), self.consensus_label)
+            true_neg = apply_mask_inverse(tf.equal(self.prediction, self.consensus_label), self.consensus_label)
+
+            correct_prediction = neg_ratio * tf.reduce_mean(tf.cast(true_pos, tf.float64)) +\
+                               pos_ration * tf.reduce_mean(tf.cast(true_neg, tf.float64))
+            self.accuracy = tf.identity(correct_prediction, name='result')
 
     def _setup_summary(self):
         tf.summary.scalar("train_accuracy", self.accuracy, collections=['train'])
-        tf.summary.image('GT', tf.expand_dims(tf.cast(self.consensus_label, tf.float32), -1),
-                    collections = ['infer'])
+        tf.summary.image('GT', tf.expand_dims(tf.cast(self.consensus_label, tf.float32), -1), collections=['infer'])
         with tf.name_scope('side_out'):
             for idx, out in enumerate(self.output_list):
-                tf.summary.image("side_{}".format(idx), 
-                    tf.cast(tf.nn.sigmoid(out), tf.float32),
-                    collections = ['infer'])
+                tf.summary.image("side_{}".format(idx), tf.cast(out, tf.float32), collections=['infer'])
+        with tf.name_scope('prediction_out'): 
+            tf.summary.image('prediction', tf.expand_dims(tf.cast(self.prediction_prob, tf.float32), -1), collections=['infer'])
+
 
     
 
@@ -192,6 +202,10 @@ class VGGHED(BaseHED):
         super(VGGHED, self).__init__(num_class=num_class, 
                                     num_channels=num_channels, 
                                     learning_rate=0.0001)
+
+    # @property    
+    # def _consensus_label(self, label):
+    #     return tf.greater(label, 1)
 
     def _create_model(self):
 
@@ -242,39 +256,33 @@ class VGGHED(BaseHED):
             # pool5 = max_pool(conv5_4, 'pool5', padding='SAME')
 
         shape_list = tf.stack([tf.shape(conv1_2), tf.shape(conv2_2), tf.shape(conv3_3), tf.shape(conv4_3), tf.shape(conv5_3)])
-        s = tf.identity(shape_list, name = 'check_shape')
+        s = tf.identity(shape_list, name='check_shape')
 
-        o_height, o_width = tf.shape(input_im)[1], tf.shape(input_im)[2]
-        o_shape = tf.shape(input_im)
-        o_shape = tf.stack([o_shape[0], o_shape[1], o_shape[2], 1])
+        o_shape = tf.shape(o_im)
+        side_1 = side_output(conv1_2, 1, o_shape, 'side_1')
+        side_2 = side_output(conv2_2, 2, o_shape, 'side_2')
+        side_3 = side_output(conv3_3, 4, o_shape, 'side_3')
+        side_4 = side_output(conv4_3, 8, o_shape, 'side_4')
+        side_5 = side_output(conv5_3, 16, o_shape, 'side_5')
 
-        side_1 = side_output(conv1_2, 1, input_im, 'side_1')
-        side_2 = side_output(conv2_2, 2, input_im, 'side_2')
-        side_3 = side_output(conv3_3, 4, input_im, 'side_3')
-        side_4 = side_output(conv4_3, 8, input_im, 'side_4')
-        side_5 = side_output(conv5_3, 16, input_im, 'side_5')
-
-        
-
+    
         with tf.variable_scope('output') as scope:
             side_mat = tf.concat([side_1, side_2, side_3, side_4, side_5], 3)
             self.output = conv(side_mat, 1, 1, 'fusion_weight',
                                 wd=0.0002, use_bias=False,
                                 init_w=tf.constant_initializer(0.2))
-            prediction_prob = tf.nn.sigmoid(self.output, name = 'pre_prob')
-            prediction = tf.squeeze(tf.greater(prediction_prob, 0.5), axis = -1)
+            self.output_list = list(map(tf.nn.sigmoid, [side_1, side_2, side_3, side_4, side_5, self.output]))
+            self.prediction_prob = tf.reduce_mean(tf.concat(self.output_list, 3), axis=-1, name='pre_prob')
+            prediction = tf.greater(self.prediction_prob, 0.5)
             self.prediction = tf.cast(prediction, tf.int32, name='pre_label')
-            self.output_list = [side_1, side_2, side_3, side_4, side_5, self.output]
-
+            
     def _get_loss(self):
         with tf.name_scope('loss'):
             # cost = []
             for idx, out in enumerate(self.output_list):
-                check_1 = tf.identity(tf.shape(out), name = 'out_shape')
-                check_2 = tf.identity(tf.shape(self.label), name = 'gt_shape')
-                out = tf.nn.sigmoid(out)
+                # out = tf.nn.sigmoid(out)
                 out = tf.squeeze(out, axis = -1)
-                self.consensus_label = tf.greater(self.label, 1)
+                
                 side_cost = class_balanced_cross_entropy_with_logits(out, self.consensus_label, name = 'cost_{}'.format(idx))
                 tf.add_to_collection('losses', side_cost)
             

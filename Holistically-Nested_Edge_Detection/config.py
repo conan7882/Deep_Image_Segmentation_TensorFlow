@@ -2,14 +2,14 @@
 # Author: Qian Ge <geqian1001@gmail.com>
 
 # directory of pre-trained vgg parameters
-# vgg_dir = 'D:\\Qian\\GitHub\\workspace\\VGG\\vgg16.npy'
-vgg_dir = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg16.npy'
+vgg_dir = 'D:\\Qian\\GitHub\\workspace\\VGG\\vgg16.npy'
+# vgg_dir = 'E:\\GITHUB\\workspace\\CNN\\pretrained\\vgg16.npy'
 
 # directory of training data
 data_dir_val = 'D:\\Qian\\GitHub\\workspace\\dataset\\Segmentation\\BSR_bsds500\\BSR\\BSDS500\\data\\'
 data_dir_train = 'D:\\Qian\\GitHub\\workspace\\dataset\\Segmentation\\HED-BSDS\\HED-BSDS\\data\\'
 
-data_dir_val = 'E:\\GITHUB\\workspace\\CNN\\dataset\\BSR_bsds500\\BSR\\BSDS500\\data\\'
+# data_dir_val = 'E:\\GITHUB\\workspace\\CNN\\dataset\\BSR_bsds500\\BSR\\BSDS500\\data\\'
 
 # root = 'E:\\GITHUB\\\workspace\\'
 root = 'D:\\Qian\\GitHub\\workspace\\'
