@@ -20,10 +20,10 @@ import config as config_path
 
 def get_config(FLAGS):
     # data for training
-    # dataset_train = BSDS500HED('train',
-    #                         data_dir=config_path.data_dir_train)
-    dataset_train = BSDS500('train',
-                            data_dir=config_path.data_dir_val)
+    dataset_train = BSDS500HED('train',
+                            data_dir=config_path.data_dir_train)
+    # dataset_train = BSDS500('train',
+    #                         data_dir=config_path.data_dir_val)
 
     dataset_val = BSDS500('val',
                           data_dir=config_path.data_dir_val)
@@ -33,10 +33,12 @@ def get_config(FLAGS):
 
 
     inference_list_validation = [
-                          InferScalars(['accuracy/result', 'loss/result'], ['test_accuracy', 'loss']),
+                          InferScalars(['loss/result'], ['loss']),
                     ]
     inference_list_test = [
-                          InferImages('output/pre_prob', 'edge'),
+                          # InferImages('output/pre_prob', 'edge'),
+                          # InferMat('test_loss', ['loss/gt_0', 'loss/side_cost_0', 'loss/side_sigmoid_out_0', 'loss/cost_0/logistic_loss'], 
+                          #          ['gt_0', 'side_cost_0', 'side_sigmoid_out_0', 'logistic_loss_mat']),
                           InferScalars('accuracy/result', 'test_accuracy_cat'),
                           InferScalars('loss/result', 'loss_cat'),
                     ]
@@ -56,12 +58,14 @@ def get_config(FLAGS):
                                   infer_batch_size = 1,
                                   inferencers=inference_list_validation),
                     FeedInferenceBatch(dataset_test, 
-                                  periodic=1000, 
+                                  periodic=100, 
                                   batch_count=1, 
                                   infer_batch_size = 1,
                                   extra_cbs = TrainSummary(key = 'infer'),
                                   inferencers=inference_list_test),
-                    CheckScalar(['accuracy/result','loss/result'], periodic=10),
+                    CheckScalar(['lr','loss/result'], periodic=10),
+                    # CheckScalar(['accuracy/result','loss/result'], periodic=10),
+                    # CheckScalar(['loss/cost_0/check_loss', 'loss/cost_0/check_loss_2', 'loss/cost_1/check'], periodic = 1)
                     # CheckScalar(['check_shape'], periodic=1),
                     # CheckScalar(['loss/out_shape', 'loss/gt_shape'], periodic=10),
                   ],

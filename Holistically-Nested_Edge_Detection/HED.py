@@ -10,6 +10,8 @@ from tensorcv.models.base import BaseModel
 from tensorcv.dataflow.image import *
 from tensorcv.utils.common import deconv_size, apply_mask, apply_mask_inverse
 
+
+WD = 0.0002
 def bilinear_upsample(input_im, up, out_shape = None):
 # https://github.com/BVLC/caffe/blob/master/include%2Fcaffe%2Ffiller.hpp#L244
 # https://github.com/ppwwyyxx/tensorpack/blob/master/tensorpack/models/pool.py#L145
@@ -71,9 +73,12 @@ def deconv_tensor_size(s, stride = 2):
 def side_output(input_conv, up, o_shape, name):
     with tf.variable_scope(name) as scope:
         side_out = conv(input_conv, 1, 1, 'conv', 
-                        wd=0.0002,
+                        wd=WD,
                         init_w=tf.constant_initializer(),
                         init_b=tf.constant_initializer())
+
+        # out_shape = tf.stack([o_shape[0], o_shape[1], o_shape[2], 1])
+        # side_out = bilinear_upsample(side_out, up, out_shape = out_shape)
 
         if up >= 2:
             
@@ -98,19 +103,29 @@ def  class_balanced_cross_entropy_with_logits(logits, label,
     with tf.name_scope(name) as scope:
         logits = tf.cast(logits, tf.float32)
 
-        
         label = tf.cast(label, tf.float32)
 
         num_pos = tf.reduce_sum(label)
         num_neg = tf.reduce_sum(1.0 - label)
-
+        
+# 
         beta = num_neg / (num_neg + num_pos)
+        
+        # beta = 0.9
         pos_weight = beta / (1 - beta)
+        check_weight = tf.identity(beta, name = 'check')
+        # check_weight = tf.identity(num_neg, name = 'check_neg')
+        # check_weight = tf.identity(num_pos, name = 'check_pos')
+        # print(check_weight)
 
         cost = tf.nn.weighted_cross_entropy_with_logits(targets=label, 
                                                         logits=logits, 
                                                         pos_weight=pos_weight)
+        # print(cost)
+        # t = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=label, 
+        #                                                 logits=logits))
         loss = tf.reduce_mean((1 - beta) * cost)
+        # check_weight = tf.identity(t, name = 'check_loss_2')
 
         return tf.where(tf.equal(beta, 1.0), 0.0, loss)
 
@@ -131,8 +146,8 @@ class BaseHED(BaseModel):
         self.keep_prob = tf.placeholder(tf.float32, name='keep_prob')
         self.image = tf.placeholder(tf.float32, name='image',
                             shape=[None, None, None, self._num_channels])
-        self.label = tf.placeholder(tf.int32, [None, None, None], 'label')
-        self.consensus_label = tf.cast(tf.greater(self.label, 1), tf.int32)
+        self.label = tf.placeholder(tf.float32, [None, None, None], 'label')
+        self.consensus_label = tf.cast(tf.greater(self.label, 0.2), tf.int32)
 
         self.set_model_input([self.image, self.keep_prob])
         self.set_dropout(self.keep_prob, keep_prob=0.5)
@@ -158,9 +173,11 @@ class BaseHED(BaseModel):
     #     raise NotImplementedError()     
 
     def _get_optimizer(self):
-        # learning_rate = tf.train.exponential_decay(self._learning_rate, self.get_global_step,
-        #                                       80000, 0.1, False)
-        return tf.train.AdamOptimizer(learning_rate=self._learning_rate)
+        learning_rate = tf.train.exponential_decay(self._learning_rate, self.get_global_step,
+                                              1500000, 0.1, False)
+        check = tf.identity(learning_rate, name = 'lr')
+
+        return tf.train.AdamOptimizer(learning_rate=learning_rate)
 
     def _ex_setup_graph(self):
         with tf.name_scope('accuracy'):
@@ -184,6 +201,9 @@ class BaseHED(BaseModel):
                 tf.summary.image("side_{}".format(idx), tf.cast(out, tf.float32), collections=['infer'])
         with tf.name_scope('prediction_out'): 
             tf.summary.image('prediction', tf.expand_dims(tf.cast(self.prediction_prob, tf.float32), -1), collections=['infer'])
+            tf.summary.image('label', tf.expand_dims(tf.cast(tf.greater(self.prediction_prob, 0.5), tf.float32), -1), collections=['infer'])
+        with tf.name_scope('train_summ'): 
+            tf.summary.image('GT', tf.expand_dims(tf.cast(self.consensus_label, tf.float32), -1), collections=['train'])
 
 
     
@@ -201,7 +221,7 @@ class VGGHED(BaseHED):
         self._pre_train_path = pre_train_path 
         super(VGGHED, self).__init__(num_class=num_class, 
                                     num_channels=num_channels, 
-                                    learning_rate=0.0001)
+                                    learning_rate=learning_rate)
 
     # @property    
     # def _consensus_label(self, label):
@@ -258,7 +278,7 @@ class VGGHED(BaseHED):
         shape_list = tf.stack([tf.shape(conv1_2), tf.shape(conv2_2), tf.shape(conv3_3), tf.shape(conv4_3), tf.shape(conv5_3)])
         s = tf.identity(shape_list, name='check_shape')
 
-        o_shape = tf.shape(o_im)
+        o_shape = tf.shape(input_im)
         side_1 = side_output(conv1_2, 1, o_shape, 'side_1')
         side_2 = side_output(conv2_2, 2, o_shape, 'side_2')
         side_3 = side_output(conv3_3, 4, o_shape, 'side_3')
@@ -269,9 +289,10 @@ class VGGHED(BaseHED):
         with tf.variable_scope('output') as scope:
             side_mat = tf.concat([side_1, side_2, side_3, side_4, side_5], 3)
             self.output = conv(side_mat, 1, 1, 'fusion_weight',
-                                wd=0.0002, use_bias=False,
+                                wd=WD, use_bias=False,
                                 init_w=tf.constant_initializer(0.2))
-            self.output_list = list(map(tf.nn.sigmoid, [side_1, side_2, side_3, side_4, side_5, self.output]))
+            self.output_list_logits = [side_1, side_2, side_3, side_4, side_5, self.output]
+            self.output_list = list(map(tf.nn.sigmoid, self.output_list_logits))
             self.prediction_prob = tf.reduce_mean(tf.concat(self.output_list, 3), axis=-1, name='pre_prob')
             prediction = tf.greater(self.prediction_prob, 0.5)
             self.prediction = tf.cast(prediction, tf.int32, name='pre_label')
@@ -279,12 +300,22 @@ class VGGHED(BaseHED):
     def _get_loss(self):
         with tf.name_scope('loss'):
             # cost = []
-            for idx, out in enumerate(self.output_list):
-                # out = tf.nn.sigmoid(out)
-                out = tf.squeeze(out, axis = -1)
+            for idx, out in enumerate(self.output_list_logits):
                 
+                out = tf.squeeze(out, axis = -1)
                 side_cost = class_balanced_cross_entropy_with_logits(out, self.consensus_label, name = 'cost_{}'.format(idx))
+
+                # check = tf.identity(self.consensus_label, name = 'gt_{}'.format(idx))
+                # check = tf.identity(side_cost, name = 'side_cost_{}'.format(idx))
+
+                # out = tf.nn.sigmoid(out)
+                # check = tf.identity(out, name = 'side_sigmoid_out_{}'.format(idx))
+                # check = class_balanced_cross_entropy_with_logits(check, self.consensus_label, name = 'cost_sigmoid_{}'.format(idx))
+                # check = tf.identity(check, name = 'side_cost_sigmoid_{}'.format(idx))
+
                 tf.add_to_collection('losses', side_cost)
+
+                tf.summary.scalar("side_loss_{}".format(idx), side_cost, collections=['infer'])
             
             return tf.add_n(tf.get_collection('losses'), name='result') 
 
