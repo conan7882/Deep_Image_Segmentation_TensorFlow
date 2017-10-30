@@ -20,15 +20,15 @@ import config as config_path
 
 def get_config(FLAGS):
     # data for training
-    dataset_train = BSDS500HED('train',
+    dataset_train = BSDS500HED('train', resize=400,
                             data_dir=config_path.data_dir_train)
-    # dataset_train = BSDS500('train',
+    # dataset_train = BSDS500('train', resize=400,
     #                         data_dir=config_path.data_dir_val)
 
-    dataset_val = BSDS500('val',
+    dataset_val = BSDS500('val', resize=400,
                           data_dir=config_path.data_dir_val)
 
-    dataset_test = BSDS500('infer',
+    dataset_test = BSDS500('infer', resize=400,
                           data_dir=config_path.data_dir_val)
 
 
@@ -46,8 +46,10 @@ def get_config(FLAGS):
     return TrainConfig(
                  dataflow = dataset_train, 
                  model = VGGHED(is_load=True,
-                            learning_rate=1e-6,
+                            learning_rate=5e-6,
                             pre_train_path=config_path.vgg_dir),
+                 is_load=True,
+                 model_name='model-60000',
                  monitors = TFSummaryWriter(),
                  callbacks = [
                     ModelSaver(periodic=1000),
@@ -55,13 +57,13 @@ def get_config(FLAGS):
                     FeedInferenceBatch(dataset_val, 
                                   periodic=100, 
                                   batch_count=400, 
-                                  infer_batch_size = 1,
+                                  infer_batch_size=1,
                                   inferencers=inference_list_validation),
                     FeedInferenceBatch(dataset_test, 
                                   periodic=100, 
                                   batch_count=1, 
-                                  infer_batch_size = 1,
-                                  extra_cbs = TrainSummary(key = 'infer'),
+                                  infer_batch_size=1,
+                                  extra_cbs = TrainSummary(key='infer'),
                                   inferencers=inference_list_test),
                     CheckScalar(['lr','loss/result'], periodic=10),
                     # CheckScalar(['accuracy/result','loss/result'], periodic=10),
@@ -69,8 +71,8 @@ def get_config(FLAGS):
                     # CheckScalar(['check_shape'], periodic=1),
                     # CheckScalar(['loss/out_shape', 'loss/gt_shape'], periodic=10),
                   ],
-                 batch_size=1, 
-                 max_epoch=100,
+                 batch_size=10, 
+                 max_epoch=20,
                  summary_periodic=100,
                  default_dirs=config_path)
 

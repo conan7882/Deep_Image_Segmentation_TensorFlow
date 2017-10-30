@@ -196,9 +196,13 @@ class BaseHED(BaseModel):
     def _setup_summary(self):
         tf.summary.scalar("train_accuracy", self.accuracy, collections=['train'])
         tf.summary.image('GT', tf.expand_dims(tf.cast(self.consensus_label, tf.float32), -1), collections=['infer'])
-        with tf.name_scope('side_out'):
+        with tf.name_scope('infer_side_out'):
             for idx, out in enumerate(self.output_list):
                 tf.summary.image("side_{}".format(idx), tf.cast(out, tf.float32), collections=['infer'])
+        with tf.name_scope('train_side_out'):
+            for idx, out in enumerate(self.output_list):
+                tf.summary.image("side_{}".format(idx), tf.cast(out, tf.float32), collections=['train'])
+            
         with tf.name_scope('prediction_out'): 
             tf.summary.image('prediction', tf.expand_dims(tf.cast(self.prediction_prob, tf.float32), -1), collections=['infer'])
             tf.summary.image('label', tf.expand_dims(tf.cast(tf.greater(self.prediction_prob, 0.5), tf.float32), -1), collections=['infer'])
@@ -279,11 +283,11 @@ class VGGHED(BaseHED):
         s = tf.identity(shape_list, name='check_shape')
 
         o_shape = tf.shape(input_im)
-        side_1 = side_output(conv1_2, 1, o_shape, 'side_1')
-        side_2 = side_output(conv2_2, 2, o_shape, 'side_2')
-        side_3 = side_output(conv3_3, 4, o_shape, 'side_3')
-        side_4 = side_output(conv4_3, 8, o_shape, 'side_4')
-        side_5 = side_output(conv5_3, 16, o_shape, 'side_5')
+        side_1 = side_output(conv1_2, 1, o_shape, 'side_0')
+        side_2 = side_output(conv2_2, 2, o_shape, 'side_1')
+        side_3 = side_output(conv3_3, 4, o_shape, 'side_2')
+        side_4 = side_output(conv4_3, 8, o_shape, 'side_3')
+        side_5 = side_output(conv5_3, 16, o_shape, 'side_4')
 
     
         with tf.variable_scope('output') as scope:

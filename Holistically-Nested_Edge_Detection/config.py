@@ -23,13 +23,14 @@ infer_data_dir = root + 'CNN\\infer_data\\'
 infer_dir = root + 'CNN\\infer\\'
 
 # directory for saving summary
-summary_dir = root + 'CNN\\model\\'
+summary_dir = root + 'CNN\\model_hed\\'
+# summary_dir = 'D:\\GoogleDrive_Qian\\GitHub\\workspace\\CNN\\model\\'
 
 # directory for saving checkpoint
-checkpoint_dir = root + 'CNN\\model\\'
+checkpoint_dir = root + 'CNN\\model_hed\\'
 
 # directory for restoring checkpoint
-model_dir = root + 'CNN\\model_4\\'
+model_dir = root + 'CNN\\model_hed\\bk3\\'
 
 # directory for saving prediction results
 result_dir = root + 'CNN\\result\\'
